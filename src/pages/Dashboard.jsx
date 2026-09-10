@@ -225,104 +225,96 @@ const Dashboard = () => {
 
     return digits;
   };
-
+// -----------------------------
+  // handleSOS
+  // -----------------------------
+  
   const handleSOS = async () => {
-    if (sosLoading) return;
+  if (sosLoading) return;
 
-    if (contacts.length === 0) {
-      alert("Please add at least one trusted contact first.");
-      return;
-    }
+  if (!contacts.length) {
+    setSosError("Please add at least one trusted contact first.");
+    return;
+  }
 
-    if (!location) {
-      alert("Please get your current location first.");
-      return;
-    }
+  if (!location) {
+    setSosError("Your live location is not available yet.");
+    return;
+  }
 
-    const contact = contacts[0];
+  const phoneNumber = normalizePhone(contacts[0].phone);
 
-    if (!contact.phone) {
-      alert("Trusted contact does not have a phone number.");
-      return;
-    }
+  if (!phoneNumber) {
+    setSosError("Trusted contact has an invalid phone number.");
+    return;
+  }
 
-    const phoneNumber = normalizePhone(contact.phone);
+  setSosLoading(true);
+  setSosError("");
+  setSosSent(false);
 
-    if (phoneNumber.length !== 12 || !phoneNumber.startsWith("91")) {
-      alert(
-        "Please enter a valid Indian 10-digit WhatsApp number for your trusted contact."
+  const mapLink =
+    `https://www.google.com/maps?q=${location.latitude},${location.longitude}`;
+
+  const timestamp = new Date().toISOString();
+
+  const message = `🚨 SAFELINK EMERGENCY SOS
+
+${user?.name || "User"} has triggered an emergency SOS.
+
+LIVE LOCATION:
+${mapLink}
+
+TIME:
+${new Date().toLocaleString()}
+
+Please reach out immediately or contact emergency services if needed.
+
+Sent via SafeLink`;
+
+  try {
+    const response = await fetch("/api/sos", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        userName: user?.name || "User",
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy,
+        timestamp,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data?.success) {
+      throw new Error(
+        data?.error || "Could not register the SOS."
       );
-      return;
     }
 
-    const mapLink =
-      `https://www.google.com/maps?q=` +
-      `${location.latitude},${location.longitude}`;
+    setSosSent(true);
 
-    const timestamp = new Date().toISOString();
+    // Open WhatsApp in the same tab.
+    const whatsappUrl =
+      `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`;
 
-    const message =
-      `SAFELINK EMERGENCY SOS\n\n` +
-      `${user?.name || "Someone"} has triggered an emergency SOS.\n\n` +
-      `LIVE LOCATION:\n` +
-      `${mapLink}\n\n` +
-      `TIME:\n` +
-      `${new Date(timestamp).toLocaleString("en-IN")}\n\n` +
-      `Please reach out immediately or contact emergency services if needed.\n\n` +
-      `Sent via SafeLink`;
+    window.location.href = whatsappUrl;
 
-    setSosLoading(true);
-    setSosError("");
-
-    try {
-      // Register the SOS with SafeLink backend first.
-      // The trusted-contact phone number is never sent to the backend.
-      const response = await fetch("/api/sos", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          userName: user?.name || "User",
-          latitude: location.latitude,
-          longitude: location.longitude,
-          accuracy: location.accuracy,
-          timestamp,
-        }),
-      });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(data?.error || "Could not register SOS.");
-      }
-
-      const whatsappUrl =
-        `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`;
-
-      const opened = window.open(whatsappUrl, "_blank");
-
-      if (!opened) {
-        throw new Error(
-          "WhatsApp could not be opened. Please allow pop-ups and try again."
-        );
-      }
-
-      setSosSent(true);
-
-      setTimeout(() => {
-        setSosSent(false);
-      }, 5000);
-    } catch (error) {
-      console.error("SOS request failed:", error);
-      setSosError(
-        error?.message ||
-          "Could not register the SOS. Please try again or call emergency services."
-      );
-    } finally {
-      setSosLoading(false);
-    }
-  };
+    setTimeout(() => {
+      setSosSent(false);
+    }, 5000);
+  } catch (error) {
+    setSosError(
+      error?.message ||
+        "Could not register the SOS. Please try again or call emergency services."
+    );
+  } finally {
+    setSosLoading(false);
+  }
+};
 
   // -----------------------------
   // FIND NEARBY EMERGENCY HELP
@@ -532,10 +524,10 @@ const Dashboard = () => {
     }
 
     return {
-      label: "No Warning",
-      className:
-        "border-green-500/30 bg-green-500/10 text-green-300",
-    };
+  label: "Information",
+  className:
+    "border-blue-500/30 bg-blue-500/10 text-blue-300",
+};
   };
 
   const checkSafetyAlerts = async () => {
