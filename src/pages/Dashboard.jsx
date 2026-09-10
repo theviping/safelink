@@ -264,7 +264,6 @@ const Dashboard = () => {
   setSosLoading(true);
   setSosError("");
   setSosSent(false);
-  await loadSosHistory();
 
   const mapLink =
     `https://www.google.com/maps?q=${location.latitude},${location.longitude}`;
@@ -308,6 +307,7 @@ Sent via SafeLink`;
       );
     }
 
+    await loadSosHistory();
     setSosSent(true);
 
     // Open WhatsApp in the same tab.
@@ -728,143 +728,6 @@ const loadSosHistory = async () => {
 
         </div>
 
-        {/* ================= SOS HISTORY ================= */}
-
-<section className="mb-8 rounded-3xl border border-white/10 bg-white/[0.03] p-7">
-  <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-
-    <div className="flex items-center gap-3">
-      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-500/10 text-red-400">
-        <History size={22} />
-      </div>
-
-      <div>
-        <h2 className="text-xl font-bold">
-          SOS History
-        </h2>
-
-        <p className="text-sm text-slate-400">
-          Your recent emergency SOS events
-        </p>
-      </div>
-    </div>
-
-    <button
-      onClick={loadSosHistory}
-      disabled={historyLoading}
-      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      <RefreshCw
-        size={16}
-        className={historyLoading ? "animate-spin" : ""}
-      />
-
-      {historyLoading ? "Loading..." : "Refresh"}
-    </button>
-  </div>
-
-  {historyError && (
-    <div className="mt-5 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
-      {historyError}
-    </div>
-  )}
-
-  {!historyLoading && !historyError && sosHistory.length === 0 && (
-    <div className="mt-6 rounded-2xl border border-dashed border-white/10 p-8 text-center">
-      <History
-        size={35}
-        className="mx-auto mb-3 text-slate-500"
-      />
-
-      <p className="font-medium text-slate-300">
-        No SOS events yet
-      </p>
-
-      <p className="mt-2 text-sm text-slate-500">
-        Your emergency SOS activity will appear here.
-      </p>
-    </div>
-  )}
-
-  {sosHistory.length > 0 && (
-    <div className="mt-6 space-y-3">
-
-      {sosHistory.map((event) => (
-        <div
-          key={event.event_id}
-          className="rounded-2xl border border-white/10 bg-black/20 p-5"
-        >
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-500/10 text-red-400">
-                <Radio size={19} />
-              </div>
-
-              <div>
-                <p className="font-semibold">
-                  Emergency SOS
-                </p>
-
-                <p className="mt-1 text-xs text-slate-500">
-                  {event.event_id}
-                </p>
-              </div>
-            </div>
-
-            <span className="w-fit rounded-full border border-green-500/20 bg-green-500/10 px-3 py-1 text-xs font-semibold text-green-400">
-              {event.status || "REGISTERED"}
-            </span>
-
-          </div>
-
-          <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-
-            <div className="flex items-center gap-2 text-slate-400">
-              <Clock size={15} />
-              <span>
-                {new Date(event.timestamp).toLocaleString("en-IN")}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2 text-slate-400">
-              <MapPin size={15} />
-              <span>
-                Accuracy ±{event.accuracy}m
-              </span>
-            </div>
-
-          </div>
-
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-
-            <a
-              href={`https://www.google.com/maps?q=${event.latitude},${event.longitude}`}
-              target="_blank"
-              rel="noreferrer"
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm font-medium transition hover:bg-white/5"
-            >
-              <MapPin size={16} />
-              View Location
-            </a>
-
-            <a
-              href={`https://www.google.com/maps/dir/?api=1&destination=${event.latitude},${event.longitude}`}
-              target="_blank"
-              rel="noreferrer"
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-500/10 px-4 py-3 text-sm font-medium text-red-400 transition hover:bg-red-500/20"
-            >
-              <Navigation size={16} />
-              Directions
-            </a>
-
-          </div>
-        </div>
-      ))}
-
-    </div>
-  )}
-</section>
 
 
         {/* ================= SOS ================= */}

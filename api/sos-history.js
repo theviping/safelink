@@ -1,5 +1,4 @@
 // SafeLink SOS History API
-// Returns the latest SOS events for a user
 
 const json = (res, status, body) => {
   res.status(status).json(body);
@@ -33,12 +32,12 @@ export default async function handler(req, res) {
       });
     }
 
-    const userName =
-      typeof req.query?.userName === "string"
-        ? req.query.userName.trim()
-        : "";
+    const userName = req.query?.userName;
 
-    if (!userName) {
+    if (
+      typeof userName !== "string" ||
+      !userName.trim()
+    ) {
       return json(res, 400, {
         error: "userName is required.",
       });
@@ -46,16 +45,17 @@ export default async function handler(req, res) {
 
     const url =
       `${process.env.SUPABASE_URL}/rest/v1/sos_events` +
-      `?select=event_id,user_name,latitude,longitude,accuracy,timestamp,status,created_at` +
-      `&user_name=eq.${encodeURIComponent(userName)}` +
+      `?user_name=eq.${encodeURIComponent(userName.trim())}` +
+      `&select=event_id,user_name,latitude,longitude,accuracy,timestamp,status,created_at` +
       `&order=created_at.desc` +
-      `&limit=10`;
+      `&limit=20`;
 
     const response = await fetch(url, {
       method: "GET",
       headers: {
         apikey: process.env.SUPABASE_SECRET_KEY,
-        Authorization: `Bearer ${process.env.SUPABASE_SECRET_KEY}`,
+        Authorization:
+          `Bearer ${process.env.SUPABASE_SECRET_KEY}`,
       },
     });
 
