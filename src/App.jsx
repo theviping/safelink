@@ -11,6 +11,7 @@ import Footer from "./components/landing/Footer";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
+import LiveLocation from "./pages/LiveLocation";
 
 const Home = () => {
   return (
@@ -36,6 +37,11 @@ function App() {
       <Route path="/register" element={<Register />} />
 
       <Route path="/dashboard" element={<Dashboard />} />
+
+      <Route
+        path="/live-location/:shareId"
+        element={<LiveLocation />}
+      />
     </Routes>
   );
 }

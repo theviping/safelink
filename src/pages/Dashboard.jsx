@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -66,6 +66,18 @@ const Dashboard = () => {
   const [sosHistory, setSosHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
+
+  // -----------------------------
+  // LIVE LOCATION SHARING
+  // -----------------------------
+
+  const [liveSharing, setLiveSharing] = useState(false);
+  const [liveShareId, setLiveShareId] = useState("");
+  const [liveShareLoading, setLiveShareLoading] = useState(false);
+  const [liveShareError, setLiveShareError] = useState("");
+  const [liveShareCopied, setLiveShareCopied] = useState(false);
+
+  const liveWatchIdRef = useRef(null);
 
   const [nearbyPlaces, setNearbyPlaces] = useState([]);
   const [nearbyLoading, setNearbyLoading] = useState(false);
@@ -369,6 +381,241 @@ const loadSosHistory = async () => {
     setHistoryLoading(false);
   }
 };
+
+  // -----------------------------
+  // LIVE LOCATION SHARING
+  // -----------------------------
+
+  const startLiveLocationSharing = async () => {
+    if (liveSharing || liveShareLoading) return;
+
+    if (!navigator.geolocation) {
+      setLiveShareError(
+        "Live location is not supported by your browser."
+      );
+      return;
+    }
+
+    if (!location) {
+      setLiveShareError(
+        "Your current location is not available yet. Please get your location first."
+      );
+      return;
+    }
+
+    setLiveShareLoading(true);
+    setLiveShareError("");
+    setLiveShareCopied(false);
+
+    try {
+      const response = await fetch("/api/location-share", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "create",
+          userName: user?.name || "User",
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracy: location.accuracy,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data?.success || !data?.shareId) {
+        throw new Error(
+          data?.error || "Could not start live location sharing."
+        );
+      }
+
+      const shareId = data.shareId;
+
+      setLiveShareId(shareId);
+      setLiveSharing(true);
+
+      const watchId = navigator.geolocation.watchPosition(
+        async (position) => {
+          const latitude = position.coords.latitude;
+          const longitude = position.coords.longitude;
+          const accuracy = position.coords.accuracy;
+
+          // Keep the dashboard's own location/map in sync too.
+          setLocation({
+            latitude,
+            longitude,
+            accuracy: Math.round(accuracy),
+          });
+
+          try {
+            const updateResponse = await fetch(
+              "/api/location-share",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  action: "update",
+                  shareId,
+                  latitude,
+                  longitude,
+                  accuracy,
+                }),
+              }
+            );
+
+            if (!updateResponse.ok) {
+              console.error(
+                "[SafeLink Location] Live location update failed."
+              );
+            }
+          } catch (error) {
+            console.error(
+              "[SafeLink Location] Live location update failed:",
+              error
+            );
+          }
+        },
+        (error) => {
+          console.error(
+            "[SafeLink Location] Geolocation watch error:",
+            error
+          );
+
+          setLiveShareError(
+            "Live location started, but the browser could not update your position."
+          );
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 5000,
+          timeout: 15000,
+        }
+      );
+
+      liveWatchIdRef.current = watchId;
+    } catch (error) {
+      console.error(
+        "[SafeLink Location] Start sharing failed:",
+        error
+      );
+
+      setLiveShareError(
+        error?.message ||
+          "Could not start live location sharing."
+      );
+    } finally {
+      setLiveShareLoading(false);
+    }
+  };
+
+  const stopLiveLocationSharing = async () => {
+    if (!liveShareId || liveShareLoading) return;
+
+    setLiveShareLoading(true);
+    setLiveShareError("");
+
+    try {
+      if (liveWatchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(
+          liveWatchIdRef.current
+        );
+        liveWatchIdRef.current = null;
+      }
+
+      const response = await fetch("/api/location-share", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "stop",
+          shareId: liveShareId,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data?.success) {
+        throw new Error(
+          data?.error || "Could not stop live location sharing."
+        );
+      }
+
+      setLiveSharing(false);
+      setLiveShareId("");
+      setLiveShareCopied(false);
+    } catch (error) {
+      console.error(
+        "[SafeLink Location] Stop sharing failed:",
+        error
+      );
+
+      setLiveShareError(
+        error?.message ||
+          "Could not stop live location sharing."
+      );
+    } finally {
+      setLiveShareLoading(false);
+    }
+  };
+
+  const copyLiveLocationLink = async () => {
+    if (!liveShareId) return;
+
+    const shareUrl =
+      `${window.location.origin}/live-location/${liveShareId}`;
+
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+
+      setLiveShareCopied(true);
+
+      setTimeout(() => {
+        setLiveShareCopied(false);
+      }, 2000);
+    } catch (error) {
+      console.error(
+        "[SafeLink Location] Could not copy share link:",
+        error
+      );
+
+      setLiveShareError(
+        "Could not copy the live location link."
+      );
+    }
+  };
+
+  const shareLiveLocationOnWhatsApp = () => {
+    if (!liveShareId) return;
+
+    const shareUrl =
+      `${window.location.origin}/live-location/${liveShareId}`;
+
+    const message = `📍 SAFELINK LIVE LOCATION
+
+${user?.name || "User"} is sharing their live location with you.
+
+Open the link to view the latest location:
+${shareUrl}
+
+Sent via SafeLink`;
+
+    window.location.href =
+      `https://wa.me/?text=${encodeURIComponent(message)}`;
+  };
+
+  useEffect(() => {
+    return () => {
+      if (liveWatchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(
+          liveWatchIdRef.current
+        );
+      }
+    };
+  }, []);
 
   // -----------------------------
   // FIND NEARBY EMERGENCY HELP
@@ -959,6 +1206,146 @@ const loadSosHistory = async () => {
   )}
 </section>
 
+
+        {/* ================= LIVE LOCATION SHARING ================= */}
+
+        <section className="mb-8 rounded-3xl border border-blue-500/20 bg-blue-500/[0.04] p-7">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
+                  <MapPin size={22} />
+                </div>
+
+                <div>
+                  <h2 className="text-xl font-bold">
+                    Live Location Sharing
+                  </h2>
+
+                  <p className="text-sm text-slate-400">
+                    Share your real-time location with people you trust.
+                  </p>
+                </div>
+              </div>
+
+              <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-500">
+                SafeLink continuously updates your location while sharing is
+                active. You can stop sharing at any time.
+              </p>
+            </div>
+
+            {!liveSharing ? (
+              <button
+                onClick={startLiveLocationSharing}
+                disabled={liveShareLoading || !location}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-500 px-5 py-3 font-semibold text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50 lg:w-auto"
+              >
+                {liveShareLoading ? (
+                  <>
+                    <LoaderCircle size={18} className="animate-spin" />
+                    Starting...
+                  </>
+                ) : (
+                  <>
+                    <Radio size={18} />
+                    Start Live Sharing
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                onClick={stopLiveLocationSharing}
+                disabled={liveShareLoading}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-500 px-5 py-3 font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50 lg:w-auto"
+              >
+                {liveShareLoading ? (
+                  <>
+                    <LoaderCircle size={18} className="animate-spin" />
+                    Stopping...
+                  </>
+                ) : (
+                  <>
+                    <Radio size={18} />
+                    Stop Sharing
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+
+          {!location && !liveSharing && (
+            <div className="mt-5 rounded-xl border border-dashed border-white/10 bg-black/10 p-4 text-sm text-slate-500">
+              Get your current location first, then start live sharing.
+            </div>
+          )}
+
+          {liveSharing && liveShareId && (
+            <div className="mt-6 rounded-2xl border border-green-500/20 bg-green-500/10 p-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-2 text-green-400">
+                    <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-green-400" />
+                    <p className="font-semibold">
+                      Live location is active
+                    </p>
+                  </div>
+
+                  <p className="mt-2 text-sm text-slate-400">
+                    Your location is being updated while this sharing session
+                    remains active.
+                  </p>
+
+                  <p className="mt-3 break-all font-mono text-xs text-slate-500">
+                    Share ID: {liveShareId}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <button
+                  onClick={copyLiveLocationLink}
+                  className="flex items-center justify-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold transition hover:bg-white/5"
+                >
+                  {liveShareCopied ? (
+                    <>
+                      <Check size={17} />
+                      Link Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={17} />
+                      Copy Live Link
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={shareLiveLocationOnWhatsApp}
+                  className="flex items-center justify-center gap-2 rounded-xl bg-green-500/10 px-4 py-3 text-sm font-semibold text-green-400 transition hover:bg-green-500/20"
+                >
+                  <ExternalLink size={17} />
+                  Share on WhatsApp
+                </button>
+              </div>
+            </div>
+          )}
+
+          {liveShareError && (
+            <div className="mt-5 flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+              <AlertTriangle size={20} className="mt-0.5 shrink-0" />
+
+              <div>
+                <p className="font-semibold">
+                  Live sharing issue
+                </p>
+
+                <p className="mt-1 text-red-200/80">
+                  {liveShareError}
+                </p>
+              </div>
+            </div>
+          )}
+        </section>
 
         {/* ================= EMERGENCY SERVICES ================= */}
 
