@@ -4,9 +4,6 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
 
 import {
   Shield,
@@ -35,13 +32,19 @@ import {
   Clock,
 } from "lucide-react";
 
-// Fix Leaflet's default marker icons in Vite/React builds.
-delete L.Icon.Default.prototype._getIconUrl;
-
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon2x,
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
+// Use a CSS/Tailwind marker instead of Leaflet's image marker.
+// This avoids broken marker-image URLs in Vite/Vercel builds.
+const locationMarkerIcon = L.divIcon({
+  className: "safelink-location-marker",
+  html: `
+    <div class="relative flex h-8 w-8 items-center justify-center">
+      <div class="absolute h-8 w-8 animate-ping rounded-full bg-red-500/40"></div>
+      <div class="relative h-4 w-4 rounded-full border-2 border-white bg-red-500 shadow-lg shadow-red-500/50"></div>
+    </div>
+  `,
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+  popupAnchor: [0, -16],
 });
 
 const RecenterMap = ({ latitude, longitude }) => {
@@ -1546,7 +1549,10 @@ Sent via SafeLink`;
                       url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                     />
 
-                    <Marker position={[location.latitude, location.longitude]}>
+                    <Marker
+                      position={[location.latitude, location.longitude]}
+                      icon={locationMarkerIcon}
+                    >
                       <Popup>
                         <div className="text-sm">
                           <strong>SafeLink Current Location</strong>
