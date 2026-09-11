@@ -24,50 +24,102 @@ const Register = () => {
 
     setError("");
 
+    // Validate password
     if (password.length < 6) {
       setError("Password must be at least 6 characters.");
       return;
     }
 
+    // Validate confirm password
     if (password !== confirmPassword) {
       setError("Passwords do not match.");
       return;
     }
 
-    setLoading(true);
-
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        data: {
-          name: name.trim(),
-        },
-        emailRedirectTo: `${window.location.origin}/login`,
-      },
-    });
-
-    setLoading(false);
-
-    if (signUpError) {
-      setError(signUpError.message);
+    // Validate name
+    if (!name.trim()) {
+      setError("Please enter your full name.");
       return;
     }
 
-    // Confirm Email is enabled in Supabase.
-    // In that case, session will normally be null until email is verified.
-    if (!data.session) {
+    // Validate email
+    if (!email.trim()) {
+      setError("Please enter your email address.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const { data, error: signUpError } =
+        await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: {
+            data: {
+              name: name.trim(),
+            },
+            emailRedirectTo: `${window.location.origin}/login`,
+          },
+        });
+
+      if (signUpError) {
+        setError(signUpError.message);
+        return;
+      }
+
+      /*
+       * IMPORTANT:
+       * Supabase Confirm Email is enabled.
+       *
+       * Never allow an unverified user to enter
+       * the dashboard.
+       */
+
+      if (data?.user && !data.user.email_confirmed_at) {
+        // Remove any temporary session created during signup.
+        await supabase.auth.signOut();
+
+        setError(
+          "Account created successfully. Please check your email and verify your account before signing in."
+        );
+
+        return;
+      }
+
+      /*
+       * This means the account is already verified
+       * and Supabase returned a valid session.
+       */
+
+      if (data?.session) {
+        // Remove old localStorage authentication
+        localStorage.removeItem("safelinkUser");
+        localStorage.removeItem("safelinkLoggedIn");
+
+        navigate("/dashboard");
+        return;
+      }
+
+      /*
+       * Safety fallback:
+       * If there is no session and no confirmed email,
+       * stay on the registration page.
+       */
+
       setError(
         "Account created. Please check your email and verify your account before signing in."
       );
-      return;
+    } catch (err) {
+      console.error("Registration error:", err);
+
+      setError(
+        err?.message ||
+          "Something went wrong while creating your account. Please try again."
+      );
+    } finally {
+      setLoading(false);
     }
-
-    // Remove old localStorage authentication
-    localStorage.removeItem("safelinkUser");
-    localStorage.removeItem("safelinkLoggedIn");
-
-    navigate("/dashboard");
   };
 
   return (
@@ -88,8 +140,10 @@ const Register = () => {
           </span>
         </Link>
 
+        {/* Register Card */}
         <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-8 shadow-2xl">
 
+          {/* Heading */}
           <div className="mb-7">
             <h1 className="text-3xl font-bold">
               Create account
@@ -100,19 +154,20 @@ const Register = () => {
             </p>
           </div>
 
-          {/* Error / Success message */}
+          {/* Error / Success Message */}
           {error && (
-            <div className="mb-5 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            <div className="mb-5 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm leading-6 text-red-400">
               {error}
             </div>
           )}
 
+          {/* Form */}
           <form
             onSubmit={handleRegister}
             className="space-y-4"
           >
 
-            {/* Name */}
+            {/* Full Name */}
             <div>
               <label className="mb-2 block text-sm text-slate-300">
                 Full Name
@@ -131,7 +186,8 @@ const Register = () => {
                   placeholder="Your name"
                   required
                   autoComplete="name"
-                  className="w-full rounded-xl border border-white/10 bg-black/20 py-3.5 pl-11 pr-4 outline-none focus:border-red-500/50"
+                  disabled={loading}
+                  className="w-full rounded-xl border border-white/10 bg-black/20 py-3.5 pl-11 pr-4 outline-none transition focus:border-red-500/50 disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </div>
             </div>
@@ -155,7 +211,8 @@ const Register = () => {
                   placeholder="you@example.com"
                   required
                   autoComplete="email"
-                  className="w-full rounded-xl border border-white/10 bg-black/20 py-3.5 pl-11 pr-4 outline-none focus:border-red-500/50"
+                  disabled={loading}
+                  className="w-full rounded-xl border border-white/10 bg-black/20 py-3.5 pl-11 pr-4 outline-none transition focus:border-red-500/50 disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </div>
             </div>
@@ -179,12 +236,13 @@ const Register = () => {
                   placeholder="Minimum 6 characters"
                   required
                   autoComplete="new-password"
-                  className="w-full rounded-xl border border-white/10 bg-black/20 py-3.5 pl-11 pr-4 outline-none focus:border-red-500/50"
+                  disabled={loading}
+                  className="w-full rounded-xl border border-white/10 bg-black/20 py-3.5 pl-11 pr-4 outline-none transition focus:border-red-500/50 disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </div>
             </div>
 
-            {/* Confirm */}
+            {/* Confirm Password */}
             <div>
               <label className="mb-2 block text-sm text-slate-300">
                 Confirm Password
@@ -205,22 +263,26 @@ const Register = () => {
                   placeholder="Repeat your password"
                   required
                   autoComplete="new-password"
-                  className="w-full rounded-xl border border-white/10 bg-black/20 py-3.5 pl-11 pr-4 outline-none focus:border-red-500/50"
+                  disabled={loading}
+                  className="w-full rounded-xl border border-white/10 bg-black/20 py-3.5 pl-11 pr-4 outline-none transition focus:border-red-500/50 disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </div>
             </div>
 
+            {/* Create Account */}
             <button
               type="submit"
               disabled={loading}
               className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-red-500 py-3.5 font-semibold transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? "Creating account..." : "Create Account"}
+
               {!loading && <ArrowRight size={18} />}
             </button>
 
           </form>
 
+          {/* Login Link */}
           <p className="mt-6 text-center text-sm text-slate-400">
             Already have an account?{" "}
             <Link
@@ -233,6 +295,7 @@ const Register = () => {
 
         </div>
 
+        {/* Back */}
         <Link
           to="/"
           className="mt-6 text-center text-sm text-slate-500 hover:text-white"
