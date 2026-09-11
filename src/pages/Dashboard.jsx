@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import L from "leaflet";
-
-
 import {
   Shield,
   MapPin,
@@ -31,21 +28,6 @@ import {
   History,
   Clock,
 } from "lucide-react";
-
-// Use a CSS/Tailwind marker instead of Leaflet's image marker.
-// This avoids broken marker-image URLs in Vite/Vercel builds.
-const locationMarkerIcon = L.divIcon({
-  className: "safelink-location-marker",
-  html: `
-    <div class="relative flex h-8 w-8 items-center justify-center">
-      <div class="absolute h-8 w-8 animate-ping rounded-full bg-red-500/40"></div>
-      <div class="relative h-4 w-4 rounded-full border-2 border-white bg-red-500 shadow-lg shadow-red-500/50"></div>
-    </div>
-  `,
-  iconSize: [32, 32],
-  iconAnchor: [16, 16],
-  popupAnchor: [0, -16],
-});
 
 const RecenterMap = ({ latitude, longitude }) => {
   const map = useMap();
@@ -1549,9 +1531,15 @@ Sent via SafeLink`;
                       url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                     />
 
-                    <Marker
-                      position={[location.latitude, location.longitude]}
-                      icon={locationMarkerIcon}
+                    <CircleMarker
+                      center={[location.latitude, location.longitude]}
+                      radius={9}
+                      pathOptions={{
+                        color: "#ef4444",
+                        fillColor: "#ef4444",
+                        fillOpacity: 0.9,
+                        weight: 3,
+                      }}
                     >
                       <Popup>
                         <div className="text-sm">
@@ -1560,7 +1548,7 @@ Sent via SafeLink`;
                           Accuracy: ±{location.accuracy}m
                         </div>
                       </Popup>
-                    </Marker>
+                    </CircleMarker>
 
                     <RecenterMap
                       latitude={location.latitude}
