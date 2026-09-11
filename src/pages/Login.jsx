@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Shield, ArrowRight, Mail, Lock } from "lucide-react";
+import { supabase } from "../lib/supabase";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -8,35 +9,49 @@ const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
 
     setError("");
+    setLoading(true);
 
-    const savedUser = JSON.parse(localStorage.getItem("safelinkUser"));
+    const { data, error: loginError } =
+      await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-    if (!savedUser) {
-      setError("No account found. Please create an account first.");
+    setLoading(false);
+
+    if (loginError) {
+      if (
+        loginError.message.toLowerCase().includes("email not confirmed")
+      ) {
+        setError(
+          "Please verify your email first. Check your inbox for the verification link."
+        );
+      } else {
+        setError(loginError.message);
+      }
       return;
     }
 
-    if (
-      savedUser.email !== email ||
-      savedUser.password !== password
-    ) {
-      setError("Invalid email or password.");
+    if (!data.user) {
+      setError("Unable to sign in. Please try again.");
       return;
     }
 
-    localStorage.setItem("safelinkLoggedIn", "true");
+    // Remove old localStorage authentication
+    localStorage.removeItem("safelinkUser");
+    localStorage.removeItem("safelinkLoggedIn");
 
     navigate("/dashboard");
   };
 
   return (
     <div className="min-h-screen bg-[#0b0f19] px-6 text-white">
-
       <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center">
 
         {/* Logo */}
@@ -96,6 +111,7 @@ const Login = () => {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
                   required
+                  autoComplete="email"
                   className="w-full rounded-xl border border-white/10 bg-black/20 py-3.5 pl-11 pr-4 outline-none transition focus:border-red-500/50"
                 />
               </div>
@@ -119,6 +135,7 @@ const Login = () => {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   required
+                  autoComplete="current-password"
                   className="w-full rounded-xl border border-white/10 bg-black/20 py-3.5 pl-11 pr-4 outline-none transition focus:border-red-500/50"
                 />
               </div>
@@ -127,10 +144,11 @@ const Login = () => {
             {/* Login */}
             <button
               type="submit"
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-500 py-3.5 font-semibold transition hover:bg-red-600"
+              disabled={loading}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-500 py-3.5 font-semibold transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Sign In
-              <ArrowRight size={18} />
+              {loading ? "Signing in..." : "Sign In"}
+              {!loading && <ArrowRight size={18} />}
             </button>
 
           </form>

@@ -1,18 +1,34 @@
 // SafeLink SOS History API
-// NOTE: This version keeps the existing userName-based database schema so it
-// remains compatible with the current sos_events table. Supabase Auth/user_id
-// can replace this filter later for true account-level isolation.
+// Returns SOS events belonging only to the authenticated user.
+
+import { createClient } from "@supabase/supabase-js";
 
 const json = (res, status, body) => {
   res.status(status).json(body);
+};
+
+const getAccessToken = (req) => {
+  const authHeader = req.headers.authorization || "";
+
+  if (!authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+
+  return authHeader.slice(7).trim() || null;
 };
 
 export default async function handler(req, res) {
   const allowedOrigin = process.env.APP_ORIGIN || "*";
 
   res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, OPTIONS"
+  );
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization"
+  );
   res.setHeader("Cache-Control", "no-store");
 
   if (req.method === "OPTIONS") {
@@ -20,28 +36,77 @@ export default async function handler(req, res) {
   }
 
   if (req.method !== "GET") {
-    return json(res, 405, { error: "Method not allowed. Use GET." });
+    return json(res, 405, {
+      error: "Method not allowed. Use GET.",
+    });
   }
 
   try {
-    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SECRET_KEY) {
-      console.error("[SafeLink SOS History] Missing Supabase environment variables");
-      return json(res, 500, { error: "Server configuration error." });
+    // --------------------------------
+    // SERVER CONFIG
+    // --------------------------------
+
+    if (
+      !process.env.SUPABASE_URL ||
+      !process.env.SUPABASE_SECRET_KEY
+    ) {
+      console.error(
+        "[SafeLink SOS History] Missing Supabase environment variables"
+      );
+
+      return json(res, 500, {
+        error: "Server configuration error.",
+      });
     }
 
-    const userName =
-      typeof req.query?.userName === "string"
-        ? req.query.userName.trim().slice(0, 100)
-        : "";
+    // --------------------------------
+    // AUTHENTICATION
+    // --------------------------------
 
-    if (!userName) {
-      return json(res, 400, { error: "userName is required." });
+    const accessToken = getAccessToken(req);
+
+    if (!accessToken) {
+      return json(res, 401, {
+        error: "Authentication required.",
+      });
     }
+
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SECRET_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
+
+    // Verify access token with Supabase Auth
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(accessToken);
+
+    if (authError || !user) {
+      console.error(
+        "[SafeLink SOS History] Authentication failed:",
+        authError
+      );
+
+      return json(res, 401, {
+        error: "Invalid or expired authentication token.",
+      });
+    }
+
+    // --------------------------------
+    // FETCH ONLY THIS USER'S EVENTS
+    // --------------------------------
 
     const url =
       `${process.env.SUPABASE_URL}/rest/v1/sos_events` +
-      `?user_name=eq.${encodeURIComponent(userName)}` +
-      `&select=event_id,user_name,latitude,longitude,accuracy,timestamp,status,created_at` +
+      `?user_id=eq.${encodeURIComponent(user.id)}` +
+      `&select=event_id,user_id,user_name,latitude,longitude,accuracy,timestamp,status,created_at` +
       `&order=created_at.desc` +
       `&limit=20`;
 
@@ -56,15 +121,32 @@ export default async function handler(req, res) {
     const responseText = await response.text();
 
     if (!response.ok) {
-      console.error("[SafeLink SOS History] Supabase error:", responseText);
-      return json(res, 500, { error: "Could not load SOS history." });
+      console.error(
+        "[SafeLink SOS History] Supabase error:",
+        responseText
+      );
+
+      return json(res, 500, {
+        error: "Could not load SOS history.",
+      });
     }
 
+    // --------------------------------
+    // SAFE JSON PARSING
+    // --------------------------------
+
     let events = [];
+
     try {
       const parsed = JSON.parse(responseText);
+
       events = Array.isArray(parsed) ? parsed : [];
-    } catch {
+    } catch (error) {
+      console.error(
+        "[SafeLink SOS History] Invalid JSON from Supabase:",
+        error
+      );
+
       events = [];
     }
 
@@ -73,7 +155,13 @@ export default async function handler(req, res) {
       events,
     });
   } catch (error) {
-    console.error("[SafeLink SOS History] Unexpected error:", error);
-    return json(res, 500, { error: "Could not load SOS history." });
+    console.error(
+      "[SafeLink SOS History] Unexpected error:",
+      error
+    );
+
+    return json(res, 500, {
+      error: "Could not load SOS history.",
+    });
   }
 }

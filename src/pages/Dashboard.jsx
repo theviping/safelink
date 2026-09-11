@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "../lib/supabase";
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import {
@@ -46,6 +47,21 @@ const getContactStorageKey = (user) => {
   return `safelinkContacts:${encodeURIComponent(identity)}`;
 };
 
+const getAuthHeaders = async () => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    throw new Error("Your session has expired. Please sign in again.");
+  }
+
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${session.access_token}`,
+  };
+};
+
 const RecenterMap = ({ latitude, longitude }) => {
   const map = useMap();
 
@@ -59,10 +75,8 @@ const RecenterMap = ({ latitude, longitude }) => {
 const Dashboard = () => {
   const navigate = useNavigate();
 
-  const user = safeParse(
-    localStorage.getItem("safelinkUser"),
-    null
-  );
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
   const contactStorageKey = getContactStorageKey(user);
 
@@ -127,19 +141,67 @@ const Dashboard = () => {
   // -----------------------------
 
   useEffect(() => {
-    const loggedIn = localStorage.getItem("safelinkLoggedIn");
-    const savedUser = safeParse(localStorage.getItem("safelinkUser"), null);
+    let mounted = true;
 
-    if (loggedIn !== "true" || !savedUser?.email) {
-      navigate("/login", { replace: true });
-    }
+    const loadUser = async () => {
+      const { data, error } = await supabase.auth.getUser();
+
+      if (!mounted) return;
+
+      if (error || !data?.user) {
+        setUser(null);
+        setAuthLoading(false);
+        navigate("/login", { replace: true });
+        return;
+      }
+
+      const authUser = data.user;
+
+      setUser({
+        id: authUser.id,
+        email: authUser.email || "",
+        name: authUser.user_metadata?.name || authUser.email || "User",
+      });
+
+      setAuthLoading(false);
+    };
+
+    loadUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+
+      if (!session?.user) {
+        setUser(null);
+        setAuthLoading(false);
+        navigate("/login", { replace: true });
+        return;
+      }
+
+      const authUser = session.user;
+
+      setUser({
+        id: authUser.id,
+        email: authUser.email || "",
+        name: authUser.user_metadata?.name || authUser.email || "User",
+      });
+
+      setAuthLoading(false);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, [navigate]);
 
   useEffect(() => {
-  if (user?.name) {
-    loadSosHistory();
-  }
-}, [user?.name]);
+    if (user?.name) {
+      loadSosHistory();
+    }
+  }, [user?.name]);
 
   // -----------------------------
   // SAVE CONTACTS
@@ -339,9 +401,7 @@ Sent via SafeLink`;
   try {
     const response = await fetch("/api/sos", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: await getAuthHeaders(),
       body: JSON.stringify({
         userName: user?.name || "User",
         latitude: location.latitude,
@@ -396,6 +456,7 @@ const loadSosHistory = async () => {
       `/api/sos-history?userName=${encodeURIComponent(user.name)}`,
       {
         method: "GET",
+        headers: await getAuthHeaders(),
         cache: "no-store",
       }
     );
@@ -450,9 +511,7 @@ const loadSosHistory = async () => {
     try {
       const response = await fetch("/api/location-share", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           action: "create",
           userName: user?.name || "User",
@@ -499,9 +558,7 @@ const loadSosHistory = async () => {
               "/api/location-share",
               {
                 method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
+                headers: await getAuthHeaders(),
                 body: JSON.stringify({
                   action: "update",
                   shareId,
@@ -575,9 +632,7 @@ const loadSosHistory = async () => {
 
       const response = await fetch("/api/location-share", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           action: "stop",
           shareId: liveShareId,
@@ -974,13 +1029,25 @@ Sent via SafeLink`;
   // LOGOUT
   // -----------------------------
 
-  const handleLogout = () => {
-    localStorage.removeItem(
-      "safelinkLoggedIn"
-    );
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
 
-    navigate("/login");
+    localStorage.removeItem("safelinkUser");
+    localStorage.removeItem("safelinkLoggedIn");
+
+    navigate("/login", { replace: true });
   };
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0b0f19] px-6 text-white">
+        <div className="flex items-center gap-3 text-slate-300">
+          <LoaderCircle size={22} className="animate-spin text-red-400" />
+          Loading SafeLink...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0b0f19] text-white">
