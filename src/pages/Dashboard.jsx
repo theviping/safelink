@@ -29,6 +29,23 @@ import {
   Clock,
 } from "lucide-react";
 
+const safeParse = (value, fallback) => {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const getContactStorageKey = (user) => {
+  const identity = String(user?.email || user?.name || "guest")
+    .trim()
+    .toLowerCase();
+
+  return `safelinkContacts:${encodeURIComponent(identity)}`;
+};
+
 const RecenterMap = ({ latitude, longitude }) => {
   const map = useMap();
 
@@ -42,14 +59,28 @@ const RecenterMap = ({ latitude, longitude }) => {
 const Dashboard = () => {
   const navigate = useNavigate();
 
-  const user = JSON.parse(
-    localStorage.getItem("safelinkUser")
+  const user = safeParse(
+    localStorage.getItem("safelinkUser"),
+    null
   );
 
+  const contactStorageKey = getContactStorageKey(user);
+
   const [contacts, setContacts] = useState(() => {
-    return JSON.parse(
-      localStorage.getItem("safelinkContacts") || "[]"
+    const currentKey = getContactStorageKey(user);
+    const saved = safeParse(localStorage.getItem(currentKey), null);
+
+    if (Array.isArray(saved)) {
+      return saved;
+    }
+
+    // One-time migration from the old global contacts key.
+    const oldContacts = safeParse(
+      localStorage.getItem("safelinkContacts"),
+      []
     );
+
+    return Array.isArray(oldContacts) ? oldContacts : [];
   });
 
   const [name, setName] = useState("");
@@ -78,6 +109,7 @@ const Dashboard = () => {
   const [liveShareCopied, setLiveShareCopied] = useState(false);
 
   const liveWatchIdRef = useRef(null);
+  const liveUpdateInFlightRef = useRef(false);
 
   const [nearbyPlaces, setNearbyPlaces] = useState([]);
   const [nearbyLoading, setNearbyLoading] = useState(false);
@@ -95,11 +127,11 @@ const Dashboard = () => {
   // -----------------------------
 
   useEffect(() => {
-    const loggedIn =
-      localStorage.getItem("safelinkLoggedIn");
+    const loggedIn = localStorage.getItem("safelinkLoggedIn");
+    const savedUser = safeParse(localStorage.getItem("safelinkUser"), null);
 
-    if (loggedIn !== "true") {
-      navigate("/login");
+    if (loggedIn !== "true" || !savedUser?.email) {
+      navigate("/login", { replace: true });
     }
   }, [navigate]);
 
@@ -114,11 +146,19 @@ const Dashboard = () => {
   // -----------------------------
 
   useEffect(() => {
-    localStorage.setItem(
-      "safelinkContacts",
-      JSON.stringify(contacts)
-    );
-  }, [contacts]);
+    try {
+      localStorage.setItem(
+        contactStorageKey,
+        JSON.stringify(contacts)
+      );
+
+      // Remove the old global key after migration so contacts cannot leak
+      // between different users on the same browser.
+      localStorage.removeItem("safelinkContacts");
+    } catch (error) {
+      console.error("[SafeLink Contacts] Could not save contacts:", error);
+    }
+  }, [contacts, contactStorageKey]);
 
   // -----------------------------
   // ADD CONTACT
@@ -448,6 +488,12 @@ const loadSosHistory = async () => {
             accuracy: Math.round(accuracy),
           });
 
+          if (liveUpdateInFlightRef.current) {
+            return;
+          }
+
+          liveUpdateInFlightRef.current = true;
+
           try {
             const updateResponse = await fetch(
               "/api/location-share",
@@ -476,6 +522,8 @@ const loadSosHistory = async () => {
               "[SafeLink Location] Live location update failed:",
               error
             );
+          } finally {
+            liveUpdateInFlightRef.current = false;
           }
         },
         (error) => {
@@ -609,13 +657,25 @@ Sent via SafeLink`;
 
   useEffect(() => {
     return () => {
+      const activeShareId = liveShareId;
+
       if (liveWatchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(
-          liveWatchIdRef.current
-        );
+        navigator.geolocation.clearWatch(liveWatchIdRef.current);
+        liveWatchIdRef.current = null;
+      }
+
+      // Best-effort server stop when leaving the dashboard. The backend
+      // expiry is the final safety net if the browser cancels this request.
+      if (activeShareId) {
+        fetch("/api/location-share", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "stop", shareId: activeShareId }),
+          keepalive: true,
+        }).catch(() => {});
       }
     };
-  }, []);
+  }, [liveShareId]);
 
   // -----------------------------
   // FIND NEARBY EMERGENCY HELP
@@ -768,16 +828,24 @@ Sent via SafeLink`;
             "",
         };
       })
-      .filter(Boolean)
+      .filter(Boolean);
+
+    const uniquePlaces = Array.from(
+      new Map(
+        places.map((place) => [
+          `${place.name.toLowerCase()}|${place.type}|${place.latitude.toFixed(5)}|${place.longitude.toFixed(5)}`,
+          place,
+        ])
+      ).values()
+    )
       .sort(
-        (a, b) =>
-          Number(a.distance) - Number(b.distance)
+        (a, b) => Number(a.distance) - Number(b.distance)
       )
       .slice(0, 30);
 
-    setNearbyPlaces(places);
+    setNearbyPlaces(uniquePlaces);
 
-    if (places.length === 0) {
+    if (uniquePlaces.length === 0) {
       setNearbyError(
         "No emergency services found within 20 km."
       );
@@ -2043,10 +2111,12 @@ Sent via SafeLink`;
               title="Trusted Network"
               text="Manage your emergency contacts."
               onClick={() =>
-                window.scrollTo({
-                  top: 600,
-                  behavior: "smooth",
-                })
+                document
+                  .getElementById("trusted-contacts")
+                  ?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                  })
               }
             />
 

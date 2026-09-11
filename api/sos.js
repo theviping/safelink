@@ -1,5 +1,7 @@
 // SafeLink SOS backend
-// Stores SOS events in Supabase
+// Stores SOS events in Supabase.
+
+import { randomUUID } from "node:crypto";
 
 const json = (res, status, body) => {
   res.status(status).json(body);
@@ -9,35 +11,25 @@ const isFiniteNumber = (value) =>
   typeof value === "number" && Number.isFinite(value);
 
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const allowedOrigin = process.env.APP_ORIGIN || "*";
+
+  res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Cache-Control", "no-store");
 
   if (req.method === "OPTIONS") {
     return res.status(204).end();
   }
 
   if (req.method !== "POST") {
-    return json(res, 405, {
-      error: "Method not allowed. Use POST.",
-    });
+    return json(res, 405, { error: "Method not allowed. Use POST." });
   }
 
   try {
-    // Check environment variables
-    if (!process.env.SUPABASE_URL) {
-      console.error("[SafeLink SOS] Missing SUPABASE_URL");
-      return json(res, 500, {
-        error: "Server configuration error: SUPABASE_URL is missing.",
-      });
-    }
-
-    if (!process.env.SUPABASE_SECRET_KEY) {
-      console.error("[SafeLink SOS] Missing SUPABASE_SECRET_KEY");
-      return json(res, 500, {
-        error:
-          "Server configuration error: SUPABASE_SECRET_KEY is missing.",
-      });
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SECRET_KEY) {
+      console.error("[SafeLink SOS] Missing Supabase environment variables");
+      return json(res, 500, { error: "Server configuration error." });
     }
 
     const body = req.body || {};
@@ -51,47 +43,26 @@ export default async function handler(req, res) {
     const longitude = Number(body.longitude);
     const accuracy = Number(body.accuracy);
 
-    if (
-      !isFiniteNumber(latitude) ||
-      latitude < -90 ||
-      latitude > 90
-    ) {
-      return json(res, 400, {
-        error: "Invalid latitude.",
-      });
+    if (!isFiniteNumber(latitude) || latitude < -90 || latitude > 90) {
+      return json(res, 400, { error: "Invalid latitude." });
     }
 
-    if (
-      !isFiniteNumber(longitude) ||
-      longitude < -180 ||
-      longitude > 180
-    ) {
-      return json(res, 400, {
-        error: "Invalid longitude.",
-      });
+    if (!isFiniteNumber(longitude) || longitude < -180 || longitude > 180) {
+      return json(res, 400, { error: "Invalid longitude." });
     }
 
-    if (
-      !isFiniteNumber(accuracy) ||
-      accuracy < 0 ||
-      accuracy > 100000
-    ) {
-      return json(res, 400, {
-        error: "Invalid location accuracy.",
-      });
+    if (!isFiniteNumber(accuracy) || accuracy < 0 || accuracy > 100000) {
+      return json(res, 400, { error: "Invalid location accuracy." });
     }
 
-    const timestamp =
-      typeof body.timestamp === "string" &&
-      !Number.isNaN(Date.parse(body.timestamp))
-        ? new Date(body.timestamp).toISOString()
-        : new Date().toISOString();
+    const parsedTimestamp =
+      typeof body.timestamp === "string" ? Date.parse(body.timestamp) : NaN;
 
-    const eventId =
-      `SOS-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 8)
-        .toUpperCase()}`;
+    const timestamp = Number.isNaN(parsedTimestamp)
+      ? new Date().toISOString()
+      : new Date(parsedTimestamp).toISOString();
+
+    const eventId = `SOS-${randomUUID()}`;
 
     const event = {
       event_id: eventId,
@@ -103,13 +74,7 @@ export default async function handler(req, res) {
       status: "REGISTERED",
     };
 
-    console.log(
-      "[SafeLink SOS] Saving event:",
-      JSON.stringify(event)
-    );
-
-    // Direct Supabase REST API request
-    const supabaseResponse = await fetch(
+    const response = await fetch(
       `${process.env.SUPABASE_URL}/rest/v1/sos_events`,
       {
         method: "POST",
@@ -117,37 +82,18 @@ export default async function handler(req, res) {
           "Content-Type": "application/json",
           apikey: process.env.SUPABASE_SECRET_KEY,
           Authorization: `Bearer ${process.env.SUPABASE_SECRET_KEY}`,
-          Prefer: "return=representation",
+          Prefer: "return=minimal",
         },
         body: JSON.stringify(event),
       }
     );
 
-    const responseText = await supabaseResponse.text();
+    const responseText = await response.text();
 
-    if (!supabaseResponse.ok) {
-      console.error(
-        "[SafeLink SOS] Supabase error:",
-        responseText
-      );
-
-      return json(res, 500, {
-        error: "Could not save SOS event.",
-      });
+    if (!response.ok) {
+      console.error("[SafeLink SOS] Supabase error:", responseText);
+      return json(res, 500, { error: "Could not save SOS event." });
     }
-
-    let savedEvent = null;
-
-    try {
-      savedEvent = JSON.parse(responseText);
-    } catch {
-      savedEvent = null;
-    }
-
-    console.log(
-      "[SafeLink SOS] Saved successfully:",
-      JSON.stringify(savedEvent)
-    );
 
     return json(res, 200, {
       success: true,
@@ -156,13 +102,7 @@ export default async function handler(req, res) {
       receivedAt: new Date().toISOString(),
     });
   } catch (error) {
-    console.error(
-      "[SafeLink SOS] Unexpected error:",
-      error
-    );
-
-    return json(res, 500, {
-      error: "Could not save SOS event.",
-    });
+    console.error("[SafeLink SOS] Unexpected error:", error);
+    return json(res, 500, { error: "Could not save SOS event." });
   }
 }
