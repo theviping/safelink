@@ -118,6 +118,23 @@ function numberOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+// IMPORTANT:
+// 0,0 is the Gulf of Guinea and is almost certainly a placeholder when
+// it appears in an alert feed. Never treat it as a real alert location.
+function isValidLatLng(latitude, longitude) {
+  return (
+    latitude != null &&
+    longitude != null &&
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180 &&
+    !(latitude === 0 && longitude === 0)
+  );
+}
+
 function parseLatLngFromText(value) {
   if (!value) return null;
 
@@ -126,7 +143,7 @@ function parseLatLngFromText(value) {
   // CAP circle format:
   // "28.6139,77.2090 25"
   const circleMatch = text.match(
-    /(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?:\s+(\d+(?:\.\d+)?))?/ 
+    /(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?:\s+(\d+(?:\.\d+)?))?/
   );
 
   if (circleMatch) {
@@ -134,14 +151,7 @@ function parseLatLngFromText(value) {
     const longitude = numberOrNull(circleMatch[2]);
     const radiusKm = numberOrNull(circleMatch[3]);
 
-    if (
-      latitude != null &&
-      longitude != null &&
-      latitude >= -90 &&
-      latitude <= 90 &&
-      longitude >= -180 &&
-      longitude <= 180
-    ) {
+    if (isValidLatLng(latitude, longitude)) {
       return {
         latitude,
         longitude,
@@ -152,21 +162,14 @@ function parseLatLngFromText(value) {
 
   // CAP point format or a simple "lat,lon" string.
   const pointMatch = text.match(
-    /(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/ 
+    /(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/
   );
 
   if (pointMatch) {
     const latitude = numberOrNull(pointMatch[1]);
     const longitude = numberOrNull(pointMatch[2]);
 
-    if (
-      latitude != null &&
-      longitude != null &&
-      latitude >= -90 &&
-      latitude <= 90 &&
-      longitude >= -180 &&
-      longitude <= 180
-    ) {
+    if (isValidLatLng(latitude, longitude)) {
       return {
         latitude,
         longitude,
@@ -202,6 +205,11 @@ function parsePolygonCentroid(value) {
 
   const longitude =
     pairs.reduce((sum, [, lng]) => sum + lng, 0) / pairs.length;
+
+  // Do not use a fake 0,0 centroid.
+  if (!isValidLatLng(latitude, longitude)) {
+    return null;
+  }
 
   return {
     latitude,
@@ -245,14 +253,7 @@ function extractLocation(itemXml) {
     numberOrNull(getTag(itemXml, "lon")) ??
     numberOrNull(getTag(itemXml, "lng"));
 
-  if (
-    latitude != null &&
-    longitude != null &&
-    latitude >= -90 &&
-    latitude <= 90 &&
-    longitude >= -180 &&
-    longitude <= 180
-  ) {
+  if (isValidLatLng(latitude, longitude)) {
     return {
       latitude,
       longitude,
@@ -361,10 +362,11 @@ function normalizeItem(itemXml, userLat, userLng) {
   const severityInfo = getSeverityInfo(itemXml);
   const location = extractLocation(itemXml);
 
+  // If the official feed does not provide a real geographic location,
+  // distance remains null instead of showing a misleading number.
   const distanceKm =
     location &&
-    Number.isFinite(location.latitude) &&
-    Number.isFinite(location.longitude)
+    isValidLatLng(location.latitude, location.longitude)
       ? haversineKm(
           userLat,
           userLng,
@@ -418,8 +420,8 @@ function normalizeItem(itemXml, userLat, userLng) {
     getTag(itemXml, "id") ||
     `${title}-${area}-${startsAt?.toISOString() || ""}`;
 
-  // If the feed provides a circle radius, use it. Otherwise use a
-  // conservative proximity hint of 25 km for point-only alerts.
+  // If the feed provides a circle radius, use it.
+  // Otherwise use a conservative proximity hint of 25 km for point-only alerts.
   const proximityRadiusKm =
     location?.radiusKm != null && location.radiusKm > 0
       ? location.radiusKm
@@ -439,11 +441,15 @@ function normalizeItem(itemXml, userLat, userLng) {
     color: severityInfo.color,
     colorCode: severityInfo.colorCode,
     source: cleanText(sender) || "NDMA SACHET",
+
+    // null means the official feed did not provide usable coordinates.
     distanceKm:
       distanceKm == null ? null : Number(distanceKm.toFixed(1)),
+
     nearby,
     startsAt: startsAt ? startsAt.toISOString() : null,
     endsAt: endsAt ? endsAt.toISOString() : null,
+
     latitude: location?.latitude ?? null,
     longitude: location?.longitude ?? null,
   };
@@ -498,7 +504,8 @@ export default async function handler(req, res) {
   try {
     const response = await fetch(SACHET_RSS_URL, {
       headers: {
-        Accept: "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+        Accept:
+          "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
         "User-Agent": "SafeLink-Emergency-App/1.0",
       },
     });
@@ -512,7 +519,9 @@ export default async function handler(req, res) {
     const xml = await response.text();
 
     if (!xml || !/<(?:rss|feed|rdf:RDF)\b/i.test(xml)) {
-      throw new Error("SACHET returned an unexpected RSS/XML response.");
+      throw new Error(
+        "SACHET returned an unexpected RSS/XML response."
+      );
     }
 
     const sourceItems = extractItems(xml);
@@ -563,7 +572,10 @@ export default async function handler(req, res) {
       alerts: finalAlerts,
     });
   } catch (error) {
-    console.error("SafeLink SACHET RSS proxy error:", error);
+    console.error(
+      "SafeLink SACHET RSS proxy error:",
+      error
+    );
 
     return res.status(502).json({
       error:
