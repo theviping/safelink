@@ -1,4 +1,4 @@
-import { Shield, Menu, X } from "lucide-react";
+import { Menu, X, Shield } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -19,8 +19,8 @@ const Navbar = () => {
           onClick={closeMenu}
           className="flex items-center gap-3"
         >
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/10 text-red-500">
-            <Shield size={24} />
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-500/10 text-red-500">
+            <Shield size={25} />
           </div>
 
           <span className="text-xl font-bold tracking-tight">
@@ -67,7 +67,6 @@ const Navbar = () => {
           >
             Get Started
           </Link>
-
         </div>
 
         {/* Mobile Menu Button */}
